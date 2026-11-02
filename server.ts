@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { GoogleGenAI, Type, ThinkingLevel } from '@google/genai';
 import { InterviewSetup } from './src/types/interview';
+import { evaluateAnswerDynamically, generateReportDynamically } from './src/utils/dynamicEvaluator';
 
 dotenv.config();
 
@@ -24,6 +25,15 @@ const ai = new GoogleGenAI({
     },
   },
 });
+
+function withTimeout<T>(promise: Promise<T>, ms = 2500): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`AI generation timed out after ${ms}ms`)), ms)
+    ),
+  ]);
+}
 
 // 1. Initialize Interview & Generate First Question / Opening Round
 app.post('/api/interview/init', async (req, res) => {
@@ -78,37 +88,68 @@ ${setup.customResumeOrProject ? `지원자가 제출한 이력/프로젝트 내�
       prompt = `${setup.company} ${setup.jobRole} 지원자의 1차 실무/심층 면접 첫 질문을 시작하세요.`;
     }
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: prompt,
-      config: {
-        systemInstruction,
-        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            question: { type: Type.STRING },
-            intent: { type: Type.STRING },
-            focusKeywords: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING },
+    const response = await withTimeout(
+      ai.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents: prompt,
+        config: {
+          systemInstruction,
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              question: { type: Type.STRING },
+              intent: { type: Type.STRING },
+              focusKeywords: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+              },
+              recommendedTimeSec: { type: Type.INTEGER },
+              interviewerReaction: { type: Type.STRING },
             },
-            recommendedTimeSec: { type: Type.INTEGER },
-            interviewerReaction: { type: Type.STRING },
+            required: ['question', 'intent', 'focusKeywords', 'recommendedTimeSec', 'interviewerReaction'],
           },
-          required: ['question', 'intent', 'focusKeywords', 'recommendedTimeSec', 'interviewerReaction'],
         },
-      },
-    });
+      }),
+      2500
+    );
 
     const parsed = JSON.parse(response.text ?? '{}');
     res.json({ success: true, data: parsed });
   } catch (error: any) {
-    console.error('Init interview error:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message || '면접 시작 질문을 생성하는 중 오류가 발생했습니다.',
+    console.warn('Init interview Gemini API unavailable or errored, using contextual baseline:', error?.message);
+    const setup: InterviewSetup = req.body;
+    const mode = setup?.mode || 'general';
+    let question = '';
+    let intent = '핵심 역량 및 실무 기여도 검증';
+    let focusKeywords = ['문제 정의', '수치 지표', '단독 기여'];
+    let recommendedTimeSec = 90;
+    let interviewerReaction = '차분하면서도 예리한 눈빛으로 지원자의 포트폴리오를 주시함';
+
+    if (mode === 'debate') {
+      question = setup.debateSetup?.contextBackground
+        ? `상대측의 핵심 전제는 실제 공학적 제약과 재무적 실현성을 간과하고 있습니다. 지원자께서 주장하시는 ${setup.debateSetup?.assignedStance} 입장의 타당성을 입증할 객관적 수치와 근거를 제시하십시오.`
+        : '상대측의 전제에 대해 구체적인 데이터와 실행 로드맵으로 반론을 제기하십시오.';
+      intent = '논점 장악 및 반박 근거 제시';
+    } else if (mode === 'pt') {
+      question = `과제 '${setup.ptSetup?.caseTitle || '핵심 공학 과제'}'에 대한 3분 핵심 PT를 시작해 주십시오. 핵심 문제 정의, 도출한 기술 솔루션, 기대되는 정량적 ROI를 순서대로 발표하십시오.`;
+      intent = 'PT 핵심 발표 및 가설 검증';
+      recommendedTimeSec = 180;
+    } else if (mode === 'english') {
+      question = `Could you walk me through the most technically rigorous problem you solved in your ${setup.jobRole || 'engineering'} role, emphasizing your specific engineering tradeoff and quantifiable metric outcome?`;
+      intent = 'Technical Depth & Ownership';
+      focusKeywords = ['Tradeoff', 'Metrics', 'Engineering Ownership'];
+    } else {
+      if (setup.customResumeOrProject) {
+        question = `제출하신 이력에 기재된 "${setup.customResumeOrProject.slice(0, 40)}..." 프로젝트에서, 팀원의 도움 없이 지원자가 순수하게 단독으로 설계하고 검증한 핵심 기술 성과를 정량 수치와 함께 설명해 주십시오.`;
+      } else {
+        question = `${setup.company || '당사'} ${setup.jobRole || '엔지니어링'} 직무에서 지원자가 지금까지 직면했던 가장 치명적인 공학적/기술적 병목(Bottleneck)은 무엇이었으며, 이를 어떤 파라미터 튜닝이나 아키텍처 개선으로 돌파하셨습니까?`;
+      }
+    }
+    res.json({
+      success: true,
+      data: { question, intent, focusKeywords, recommendedTimeSec, interviewerReaction },
     });
   }
 });
@@ -196,96 +237,120 @@ Delivery Stats: Duration: ${speechStats?.durationSec || 0}s, Fillers: ${speechSt
 `;
     }
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: promptContext,
-      config: {
-        systemInstruction,
-        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            starScores: {
-              type: Type.OBJECT,
-              properties: {
-                situation: { type: Type.INTEGER, description: '1-100' },
-                task: { type: Type.INTEGER, description: '1-100' },
-                action: { type: Type.INTEGER, description: '1-100' },
-                result: { type: Type.INTEGER, description: '1-100' },
-              },
-              required: ['situation', 'task', 'action', 'result'],
-            },
-            overallScore: { type: Type.INTEGER, description: '1-100점 종합 점수' },
-            strengths: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING },
-              description: '답변에서 긍정적이었던 점 (1~2개)',
-            },
-            weaknesses: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING },
-              description: '답변의 논리적 허점, 부족했던 수치적 근거, 모호한 표현 지적 (2~3개)',
-            },
-            feedbackComment: {
-              type: Type.STRING,
-              description: '면접관의 즉각적인 내면 평가 및 피드백 (냉철하고 직설적)',
-            },
-            interviewerAttitude: {
-              type: Type.STRING,
-              description: '면접관의 리액션 (예: 미간을 찌푸리며 노트를 끄적임, 차가운 눈빛 등)',
-            },
-            isLastRound: { type: Type.BOOLEAN },
-            nextQuestion: {
-              type: Type.STRING,
-              description: isLastRound ? '마지막 정리 질문 또는 종료 멘트' : '방금 답변의 허점을 겨냥한 날카로운 꼬리 질문 또는 토론 재반박',
-            },
-            tailQuestionType: {
-              type: Type.STRING,
-              description: '수치 검증 / 트레이드오프 / 반박 및 압박 / 예외 상황 / 토론 논박 / PT 맹점 검증',
-            },
-            recommendedModelAnswerGuide: {
-              type: Type.STRING,
-              description: '이 발언을 훨씬 설득력 있게 보강하는 모범 가이드',
-            },
-            englishGrammarFixes: {
-              type: Type.ARRAY,
-              items: {
+    const response = await withTimeout(
+      ai.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents: promptContext,
+        config: {
+          systemInstruction,
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              starScores: {
                 type: Type.OBJECT,
                 properties: {
-                  original: { type: Type.STRING },
-                  improved: { type: Type.STRING },
-                  reason: { type: Type.STRING },
+                  situation: { type: Type.INTEGER, description: '1-100' },
+                  task: { type: Type.INTEGER, description: '1-100' },
+                  action: { type: Type.INTEGER, description: '1-100' },
+                  result: { type: Type.INTEGER, description: '1-100' },
                 },
-                required: ['original', 'improved', 'reason'],
+                required: ['situation', 'task', 'action', 'result'],
               },
-              description: '영어 면접 시 문법/어휘 교정 제안',
+              overallScore: { type: Type.INTEGER, description: '1-100점 종합 점수' },
+              strengths: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+                description: '답변에서 긍정적이었던 점 (1~2개)',
+              },
+              weaknesses: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+                description: '답변의 논리적 허점, 부족했던 수치적 근거, 모호한 표현 지적 (2~3개)',
+              },
+              feedbackComment: {
+                type: Type.STRING,
+                description: '면접관의 즉각적인 내면 평가 및 피드백 (냉철하고 직설적)',
+              },
+              interviewerAttitude: {
+                type: Type.STRING,
+                description: '면접관의 리액션 (예: 미간을 찌푸리며 노트를 끄적임, 차가운 눈빛 등)',
+              },
+              isLastRound: { type: Type.BOOLEAN },
+              nextQuestion: {
+                type: Type.STRING,
+                description: isLastRound ? '마지막 정리 질문 또는 종료 멘트' : '방금 답변의 허점을 겨냥한 날카로운 꼬리 질문 또는 토론 재반박',
+              },
+              tailQuestionType: {
+                type: Type.STRING,
+                description: '수치 검증 / 트레이드오프 / 반박 및 압박 / 예외 상황 / 토론 논박 / PT 맹점 검증',
+              },
+              recommendedModelAnswerGuide: {
+                type: Type.STRING,
+                description: '이 발언을 훨씬 설득력 있게 보강하는 모범 가이드',
+              },
+              englishGrammarFixes: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    original: { type: Type.STRING },
+                    improved: { type: Type.STRING },
+                    reason: { type: Type.STRING },
+                  },
+                  required: ['original', 'improved', 'reason'],
+                },
+                description: '영어 면접 시 문법/어휘 교정 제안',
+              },
             },
+            required: [
+              'starScores',
+              'overallScore',
+              'strengths',
+              'weaknesses',
+              'feedbackComment',
+              'interviewerAttitude',
+              'isLastRound',
+              'nextQuestion',
+              'tailQuestionType',
+              'recommendedModelAnswerGuide',
+            ],
           },
-          required: [
-            'starScores',
-            'overallScore',
-            'strengths',
-            'weaknesses',
-            'feedbackComment',
-            'interviewerAttitude',
-            'isLastRound',
-            'nextQuestion',
-            'tailQuestionType',
-            'recommendedModelAnswerGuide',
-          ],
         },
-      },
-    });
+      }),
+      2500
+    );
 
     const parsed = JSON.parse(response.text ?? '{}');
     res.json({ success: true, data: parsed });
   } catch (error: any) {
-    console.error('Evaluate answer error:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message || '답변 평가 및 꼬리 질문 생성 중 오류가 발생했습니다.',
-    });
+    console.warn('Gemini evaluate-and-tail API error/timeout, computing dynamic answer evaluation:', error?.message);
+    const {
+      setup,
+      currentQuestion,
+      candidateAnswer,
+      speechStats,
+      currentRound,
+      maxRounds,
+    } = req.body;
+
+    const dynamicEvaluation = evaluateAnswerDynamically(
+      setup,
+      candidateAnswer || '',
+      currentQuestion || '',
+      speechStats || {
+        durationSec: 45,
+        fillerCount: 0,
+        detectedFillers: {},
+        gazeOffCount: 0,
+        gazeCenterPercent: 90,
+      },
+      currentRound || 1,
+      maxRounds || 3
+    );
+
+    res.json({ success: true, data: dynamicEvaluation });
   }
 });
 
@@ -314,114 +379,126 @@ ${JSON.stringify(rounds, null, 2)}
 - 태도 지수: ${telemetry.eyeContactScore}점/100점
 `;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: prompt,
-      config: {
-        systemInstruction,
-        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            passVerdict: {
-              type: Type.STRING,
-              description: '합격 유력 (Strong Hire) / 합격권 (Hire) / 보류 (Borderline) / 탈락 (No Hire)',
-            },
-            verdictSummary: {
-              type: Type.STRING,
-              description: '채용위원회 최종 한줄 총평 (1~2문장)',
-            },
-            radarScores: {
-              type: Type.OBJECT,
-              properties: {
-                logicStructure: { type: Type.INTEGER, description: '논리적 구성 및 체계 (0-100)' },
-                dataSpecificity: { type: Type.INTEGER, description: '구체성 및 수치화 검증 (0-100)' },
-                stressTolerance: { type: Type.INTEGER, description: '압박 대처력 및 반박 회복력 (0-100)' },
-                jobCompetency: { type: Type.INTEGER, description: '직무 전문성 및 본질 이해 (0-100)' },
-                deliveryAndPresence: { type: Type.INTEGER, description: '전달력, 시선, 말버릇 절제 (0-100)' },
+    const response = await withTimeout(
+      ai.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents: prompt,
+        config: {
+          systemInstruction,
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              passVerdict: {
+                type: Type.STRING,
+                description: '합격 유력 (Strong Hire) / 합격권 (Hire) / 보류 (Borderline) / 탈락 (No Hire)',
               },
-              required: ['logicStructure', 'dataSpecificity', 'stressTolerance', 'jobCompetency', 'deliveryAndPresence'],
-            },
-            totalScore: { type: Type.INTEGER, description: '100점 만점 환산 점수' },
-            keyStrengths: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING },
-              description: '면접관의 인정을 받은 핵심 강점 3가지',
-            },
-            criticalWeaknesses: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING },
-              description: '반드시 고쳐야 할 치명적 약점 및 허점 3가지',
-            },
-            speechAndHabitCritique: {
-              type: Type.STRING,
-              description: '시선 처리, 말버릇, 답변 속도 등에 대한 전문 코칭 코멘트',
-            },
-            actionPlan: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING },
-              description: '다음 실전 면접까지 개선해야 할 액션 플랜 3단계',
-            },
-            roundBreakdowns: {
-              type: Type.ARRAY,
-              items: {
+              verdictSummary: {
+                type: Type.STRING,
+                description: '채용위원회 최종 한줄 총평 (1~2문장)',
+              },
+              radarScores: {
                 type: Type.OBJECT,
                 properties: {
-                  roundNumber: { type: Type.INTEGER },
-                  coreTopic: { type: Type.STRING },
-                  pressureTrigger: { type: Type.STRING, description: '꼬리 질문/재반박이 발동된 계기' },
-                  score: { type: Type.INTEGER },
-                  oneLineVerdict: { type: Type.STRING },
+                  logicStructure: { type: Type.INTEGER, description: '논리적 구성 및 체계 (0-100)' },
+                  dataSpecificity: { type: Type.INTEGER, description: '구체성 및 수치화 검증 (0-100)' },
+                  stressTolerance: { type: Type.INTEGER, description: '압박 대처력 및 반박 회복력 (0-100)' },
+                  jobCompetency: { type: Type.INTEGER, description: '직무 전문성 및 본질 이해 (0-100)' },
+                  deliveryAndPresence: { type: Type.INTEGER, description: '전달력, 시선, 말버릇 절제 (0-100)' },
                 },
-                required: ['roundNumber', 'coreTopic', 'pressureTrigger', 'score', 'oneLineVerdict'],
+                required: ['logicStructure', 'dataSpecificity', 'stressTolerance', 'jobCompetency', 'deliveryAndPresence'],
               },
-            },
-            modeSpecificReport: {
-              type: Type.OBJECT,
-              properties: {
-                mode: { type: Type.STRING },
-                title: { type: Type.STRING },
-                highlightMetrics: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      label: { type: Type.STRING },
-                      value: { type: Type.STRING },
-                      assessment: { type: Type.STRING },
-                    },
-                    required: ['label', 'value', 'assessment'],
+              totalScore: { type: Type.INTEGER, description: '100점 만점 환산 점수' },
+              keyStrengths: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+                description: '면접관의 인정을 받은 핵심 강점 3가지',
+              },
+              criticalWeaknesses: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+                description: '반드시 고쳐야 할 치명적 약점 및 허점 3가지',
+              },
+              speechAndHabitCritique: {
+                type: Type.STRING,
+                description: '시선 처리, 말버릇, 답변 속도 등에 대한 전문 코칭 코멘트',
+              },
+              actionPlan: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+                description: '다음 실전 면접까지 개선해야 할 액션 플랜 3단계',
+              },
+              roundBreakdowns: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    roundNumber: { type: Type.INTEGER },
+                    coreTopic: { type: Type.STRING },
+                    pressureTrigger: { type: Type.STRING, description: '꼬리 질문/재반박이 발동된 계기' },
+                    score: { type: Type.INTEGER },
+                    oneLineVerdict: { type: Type.STRING },
                   },
+                  required: ['roundNumber', 'coreTopic', 'pressureTrigger', 'score', 'oneLineVerdict'],
                 },
-                coachingAdvice: { type: Type.STRING },
               },
-              required: ['mode', 'title', 'highlightMetrics', 'coachingAdvice'],
+              modeSpecificReport: {
+                type: Type.OBJECT,
+                properties: {
+                  mode: { type: Type.STRING },
+                  title: { type: Type.STRING },
+                  highlightMetrics: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        label: { type: Type.STRING },
+                        value: { type: Type.STRING },
+                        assessment: { type: Type.STRING },
+                      },
+                      required: ['label', 'value', 'assessment'],
+                    },
+                  },
+                  coachingAdvice: { type: Type.STRING },
+                },
+                required: ['mode', 'title', 'highlightMetrics', 'coachingAdvice'],
+              },
             },
+            required: [
+              'passVerdict',
+              'verdictSummary',
+              'radarScores',
+              'totalScore',
+              'keyStrengths',
+              'criticalWeaknesses',
+              'speechAndHabitCritique',
+              'actionPlan',
+              'roundBreakdowns',
+            ],
           },
-          required: [
-            'passVerdict',
-            'verdictSummary',
-            'radarScores',
-            'totalScore',
-            'keyStrengths',
-            'criticalWeaknesses',
-            'speechAndHabitCritique',
-            'actionPlan',
-            'roundBreakdowns',
-          ],
         },
-      },
-    });
+      }),
+      2500
+    );
 
     const parsed = JSON.parse(response.text ?? '{}');
     res.json({ success: true, data: parsed });
   } catch (error: any) {
-    console.error('Final report error:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message || '최종 면접 리포트 생성 중 오류가 발생했습니다.',
-    });
+    console.warn('Final report Gemini error/timeout, generating dynamic debrief report:', error?.message);
+    const { setup, rounds, telemetry } = req.body;
+    const dynamicReport = generateReportDynamically(
+      setup,
+      rounds || [],
+      telemetry || {
+        totalDurationSec: 180,
+        avgDurationSec: 45,
+        totalFillerCount: 0,
+        totalGazeOffCount: 0,
+        eyeContactScore: 90,
+      }
+    );
+    res.json({ success: true, data: dynamicReport });
   }
 });
 

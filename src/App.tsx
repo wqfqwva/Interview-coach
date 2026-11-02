@@ -8,6 +8,7 @@ import {
   InterviewRound,
   FinalReportData,
 } from './types/interview';
+import { evaluateAnswerDynamically, generateReportDynamically } from './utils/dynamicEvaluator';
 
 export default function App() {
   const [currentView, setCurrentView] = useState<'setup' | 'interview' | 'report'>('setup');
@@ -168,8 +169,16 @@ export default function App() {
         setInterviewerAttitude(evalData.interviewerAttitude);
       }
     } catch (err: any) {
-      console.error('Answer submission failed:', err);
-      // Graceful fallback tail question
+      console.warn('Backend evaluation call failed or offline, computing dynamic evaluation:', err);
+      const evalData = evaluateAnswerDynamically(
+        setup,
+        answerText,
+        currentQuestion,
+        speechStats,
+        currentRoundNumber,
+        maxRounds
+      );
+
       const completedRound: InterviewRound = {
         roundNumber: currentRoundNumber,
         question: currentQuestion,
@@ -178,36 +187,19 @@ export default function App() {
         recommendedTimeSec,
         candidateAnswer: answerText,
         speechStats,
-        evaluation: {
-          starScores: { situation: 75, task: 70, action: 72, result: 68 },
-          overallScore: 71,
-          strengths: ['자신감 있는 어조로 논지를 전개함'],
-          weaknesses: ['정량적 수치 지표가 다소 부족함', '상대측 반박이나 핵심 맹점에 대한 사전 대비 부족'],
-          feedbackComment: '전반적인 흐름은 양호하나, 면접관이 신뢰할 만한 결정적 수치 데이터가 결여되어 있습니다.',
-          interviewerAttitude: '팔짱을 끼고 의자에 기대며 답변의 진위 여부를 저울질함',
-          isLastRound: currentRoundNumber >= maxRounds,
-          nextQuestion: setup.mode === 'debate'
-            ? '방금 제시하신 대안은 초기 비용이 막대하여 실현 가능성이 희박합니다. 이에 대해 어떻게 반론하시겠습니까?'
-            : setup.mode === 'pt'
-            ? '제시하신 전략에서 초기 6개월간 목표치에 도달하지 못할 경우 어떤 피벗(Pivot) 시나리오를 가지고 계십니까?'
-            : setup.mode === 'english'
-            ? 'If the primary assumptions you made proved to be invalid midway through the rollout, how would you pivot with minimum business disruption?'
-            : '방금 말씀하신 솔루션에서 예상치 못한 장애나 반발이 발생했을 때 어떻게 대응하셨습니까?',
-          tailQuestionType: '예외 상황 대응 및 트레이드오프',
-          recommendedModelAnswerGuide: '수치를 두괄식으로 제시하고, 본인이 직접 검증한 팩트와 가설 검증 사이클을 강조해야 합니다.',
-        },
+        evaluation: evalData,
       };
 
       const updatedRounds = [...rounds, completedRound];
       setRounds(updatedRounds);
 
-      if (currentRoundNumber >= maxRounds) {
+      if (evalData.isLastRound || currentRoundNumber >= maxRounds) {
         await generateFinalReport(updatedRounds, speechStats);
       } else {
         setCurrentRoundNumber((prev) => prev + 1);
-        setCurrentQuestion(completedRound.evaluation!.nextQuestion);
-        setCurrentIntent('수치 검증 및 맹점 반박');
-        setInterviewerAttitude('의자에 깊숙이 기대며 집요한 눈빛으로 쳐다봄');
+        setCurrentQuestion(evalData.nextQuestion);
+        setCurrentIntent(`${evalData.tailQuestionType} - 심층 공방 및 맹점 검증`);
+        setInterviewerAttitude(evalData.interviewerAttitude);
       }
     } finally {
       setIsLoading(false);
@@ -257,69 +249,9 @@ export default function App() {
       setFinalReport(json.data);
       setCurrentView('report');
     } catch (err: any) {
-      console.error('Final report generation failed:', err);
-      // Fallback report
-      setFinalReport({
-        passVerdict: '합격권 (Hire)',
-        verdictSummary: `${setup.mode === 'debate' ? '토론 면접에서' : setup.mode === 'pt' ? 'PT 발표 및 질의응답에서' : setup.mode === 'english' ? 'Global English Interview에서' : '압박 면접에서'} 당황하지 않고 핵심 논리를 방어했으며, 특히 본질 이해도가 우수합니다.`,
-        radarScores: {
-          logicStructure: 78,
-          dataSpecificity: 72,
-          stressTolerance: 82,
-          jobCompetency: 84,
-          deliveryAndPresence: 75,
-        },
-        totalScore: 78,
-        keyStrengths: [
-          '돌발적인 꼬리 질문 및 상대 반론에도 침착하게 대처하는 논리 방어력',
-          '도메인에 대한 깊이 있는 이해와 문제 해결에 대한 진정성 있는 태도',
-          '구조화된 결론 제시와 흔들림 없는 주장 유지',
-        ],
-        criticalWeaknesses: [
-          '성과/주장을 설명할 때 구체적인 비교 기준치(Baseline vs After) 수치 부재',
-          '상대방이 제기한 반론의 핵심 전제를 무력화시키는 결정적 근거 보강 필요',
-          '압박을 받을 때 시선이 일시 분산되는 비언어적 신호',
-        ],
-        speechAndHabitCritique: '평균 발언 시간은 적절했으나, 생각이 깊어질 때 완충 어휘 노출을 줄이고 첫 문장을 단정적인 두괄식으로 시작하는 훈련이 필요합니다.',
-        actionPlan: [
-          '모든 핵심 주장을 "숫자 3개(지표명, 기존 수치, 개선 수치)"로 요약하는 연습',
-          '꼬리 질문/재반박을 받았을 때 상대 발언을 짚고 즉시 반증 근거를 전개하는 프레이밍 훈련',
-          '카메라 렌즈(면접관의 미간)를 응시하며 60초 안에 끝내는 스피치 반복 훈련',
-        ],
-        roundBreakdowns: allRounds.map((r, i) => ({
-          roundNumber: r.roundNumber,
-          coreTopic: r.intent,
-          pressureTrigger: r.evaluation?.weaknesses?.[0] || '구체적 지표 검증',
-          score: r.evaluation?.overallScore || 75,
-          oneLineVerdict: r.evaluation?.feedbackComment || '논리적 전달 완료',
-        })),
-        modeSpecificReport: {
-          mode: setup.mode,
-          title: setup.mode === 'debate' ? '토론 면접 공방 정밀 진단' : setup.mode === 'pt' ? 'PT 발표 및 맹점 방어력 진단' : 'Global English CEFR Proficiency Assessment',
-          highlightMetrics: setup.mode === 'debate'
-            ? [
-                { label: '논박 타격률', value: '82%', assessment: '상대 주장의 허점을 정확히 공략함' },
-                { label: '논점 유지도', value: '88%', assessment: '말려들지 않고 배정된 입장을 고수함' },
-                { label: '토론 에티켓', value: '95점', assessment: '감정적 대응 없이 정중한 화법 유지' },
-              ]
-            : setup.mode === 'pt'
-            ? [
-                { label: '문제 정의력', value: '85점', assessment: '핵심 병목과 근본 원인을 명확히 짚음' },
-                { label: '실행 가능성', value: '78점', assessment: '현실적 리소스 대비 적절한 단계별 로드맵' },
-                { label: '질의응답 방어', value: '80점', assessment: '심사위원의 송곳 지적에 침착히 대안 제시' },
-              ]
-            : [
-                { label: 'CEFR Level', value: 'C1 (Advanced)', assessment: 'Expresses ideas fluently without obvious searching for expressions.' },
-                { label: 'Lexical Precision', value: '84점', assessment: 'Strong technical & business idiom utilization.' },
-                { label: 'Grammar Accuracy', value: '82점', assessment: 'Minor tense slips under pressure, overall cohesive.' },
-              ],
-          coachingAdvice: setup.mode === 'debate'
-            ? '상대 주장을 반박할 때 "상대방 말씀처럼..." 대신 "상대측의 전제인 ~은 현실에서 ~한 위험이 있습니다"로 전제 자체를 흔드는 고급 디베이트 기법을 활용하세요.'
-            : setup.mode === 'pt'
-            ? '발표 첫 30초 안에 결론(Key Recommendation)과 기대 ROI를 먼저 선언하는 엘리베이터 피치 구조를 강화하세요.'
-            : 'Practice transitional business signposts such as "On the flip side", "To substantiate this with numbers", and "The key tradeoff we mitigated was...".',
-        },
-      });
+      console.warn('Final report generation failed or offline, computing dynamic debrief:', err);
+      const dynamicReport = generateReportDynamically(setup, allRounds, telemetry);
+      setFinalReport(dynamicReport);
       setCurrentView('report');
     } finally {
       setIsLoading(false);
