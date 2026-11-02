@@ -4,6 +4,7 @@ import {
   InterviewRound,
 } from '../types/interview';
 import { WebcamTracker } from './WebcamTracker';
+import { VirtualInterviewerFace } from './VirtualInterviewerFace';
 import { analyzeFillerWords } from '../data/interviewConfig';
 import { speakInterviewerText, stopSpeaking, soundManager } from '../utils/audioSpeech';
 import {
@@ -240,11 +241,11 @@ export const InterviewCockpit: React.FC<InterviewCockpitProps> = ({
     } else {
       if (type === 'logical') {
         setCandidateAnswer(
-          '당시 핵심 지표는 P99 레이턴시였습니다. 상황 분석 결과 DB I/O 병목이 78%를 차지하고 있었고, 저는 Redis 기반 인메모리 캐싱과 벌크 쿼리 파이프라이닝을 직접 설계하여 배포했습니다. 그 결과 일간 2,500만 건 트랜잭션 상황에서도 평균 응답 시간을 420ms에서 65ms로 84% 단축시켰으며, 서버 인스턴스 비용을 월 30% 절감했습니다.'
+          'GAA 3나노 공정 시양산 단계에서 나노시트 단차 피복성과 게이트 산화막 누설 전류가 핵심 과제였습니다. 챔버 내 플라즈마 압력과 전력 파라미터를 최적화하여 비등방성 식각율을 14% 향상시켰고, High-k 유전체 증착 온도를 정밀 제어하여 계면 결함 밀도를 28% 저감했습니다. 그 결과 웨이퍼 센터와 엣지 간의 수율 편차를 12%에서 3.4%로 축소하며 시양산 골든 수율 70%를 달성했습니다.'
         );
       } else {
         setCandidateAnswer(
-          '어... 그 부분은 솔직히 팀원들이랑 같이 회의를 많이 해서 잘 풀었던 것 같고요. 약간 성능 문제가 있었는데 이제 프레임워크 최적화를 진행해서 전반적으로 되게 많이 빨라졌습니다. 사실상 사용자 반응도 좋았습니다.'
+          '어... 그 부분은 선임 연구원님들이랑 시뮬레이션을 많이 돌려봤고요, 솔직히 장비 파라미터를 이것저것 약간 조정해봤더니 전반적으로 웨이퍼 상태가 되게 많이 좋아졌습니다. 사실상 양산에도 큰 문제는 없었습니다.'
         );
       }
     }
@@ -358,60 +359,38 @@ export const InterviewCockpit: React.FC<InterviewCockpitProps> = ({
       {/* Main Dual Stage Split: Left AI Interviewer / Opponent, Right Candidate Feed */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
         {/* Left: AI Interviewer / Debate Opponent Persona Stage */}
-        <div className="bg-slate-900 rounded-xl p-6 border border-slate-800 text-white flex flex-col justify-between shadow-lg relative overflow-hidden">
+        <div className="bg-slate-900 rounded-xl p-5 border border-slate-800 text-white flex flex-col justify-between shadow-lg relative overflow-hidden space-y-4">
           {/* Subtle background ambient pulse */}
           <div className="absolute -top-16 -left-16 w-48 h-48 bg-rose-950/40 rounded-full blur-3xl pointer-events-none" />
 
-          <div className="space-y-4 relative z-10">
-            {/* Interviewer Profile Header */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-slate-700 to-slate-900 border border-slate-700 flex items-center justify-center font-bold text-lg text-white shadow-md">
-                  {isDebateMode ? 'VS' : setup.interviewerPersona.avatarInitials}
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-base">
-                      {isDebateMode ? setup.debateSetup?.opponentName : setup.interviewerPersona.name}
-                    </span>
-                    <span className="text-xs text-slate-400">
-                      {isDebateMode ? setup.debateSetup?.opponentRole : setup.interviewerPersona.title}
-                    </span>
-                  </div>
-                  <div className="text-[11px] text-slate-400">
-                    {isDebateMode ? `반대 입장 견지: ${setup.debateSetup?.assignedStance === '찬성' ? '반대측' : '찬성측'} 대표` : setup.interviewerPersona.pressureStyle}
-                  </div>
-                </div>
-              </div>
+          {/* 1. Interactive Animated Virtual Interviewer Face */}
+          <div className="relative">
+            <VirtualInterviewerFace
+              persona={setup.interviewerPersona}
+              isSpeaking={isSpeakingTTS}
+              isLoading={isLoadingNext}
+              attitudeText={interviewerAttitude}
+            />
 
-              {/* TTS Audio Controls */}
-              <div className="flex items-center gap-1.5">
-                <button
-                  onClick={handleTTSReplay}
-                  className={`p-2 rounded-lg text-xs transition-colors flex items-center gap-1 cursor-pointer ${
-                    isSpeakingTTS
-                      ? 'bg-rose-600 text-white animate-pulse'
-                      : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
-                  }`}
-                  title={isSpeakingTTS ? '음성 중지' : '다시 듣기'}
-                >
-                  {isSpeakingTTS ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
-                </button>
-              </div>
+            {/* Float TTS Replay Button */}
+            <div className="absolute top-2.5 right-2.5 z-30 flex items-center gap-1.5">
+              <button
+                onClick={handleTTSReplay}
+                className={`p-2 rounded-lg text-xs transition-all flex items-center gap-1 cursor-pointer shadow-md ${
+                  isSpeakingTTS
+                    ? 'bg-rose-600 text-white animate-pulse'
+                    : 'bg-black/60 hover:bg-black/80 text-slate-200 border border-white/10'
+                }`}
+                title={isSpeakingTTS ? '음성 중지' : '질문 다시 듣기'}
+              >
+                {isSpeakingTTS ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+              </button>
             </div>
+          </div>
 
-            {/* Attitude / Body Language Reaction Callout */}
-            {interviewerAttitude && (
-              <div className="p-2.5 rounded-lg bg-slate-800/80 border border-slate-700/60 text-xs text-slate-300 flex items-center gap-2">
-                <span className="text-rose-400 font-semibold shrink-0">
-                  {isDebateMode ? '상대 토론자 태도:' : isEnglishMode ? 'Interviewer Attitude:' : '면접관 반응:'}
-                </span>
-                <span className="italic">{interviewerAttitude}</span>
-              </div>
-            )}
-
+          <div className="space-y-3 relative z-10">
             {/* Current Question / Counter-Rebuttal Box */}
-            <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800 space-y-2">
+            <div className="p-4 rounded-xl bg-slate-950/90 border border-slate-800 space-y-2">
               <div className="flex items-center justify-between text-[11px] text-slate-400">
                 <span className="font-mono text-rose-400 font-bold">
                   {isDebateMode

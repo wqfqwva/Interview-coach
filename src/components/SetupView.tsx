@@ -37,13 +37,13 @@ interface SetupViewProps {
 
 export const SetupView: React.FC<SetupViewProps> = ({ onStartInterview, isLoading }) => {
   const [selectedMode, setSelectedMode] = useState<InterviewMode>('general');
-  const [selectedCompanyId, setSelectedCompanyId] = useState<string>('toss');
-  const [selectedJobRoleId, setSelectedJobRoleId] = useState<string>('backend');
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string>('samsung_ds');
+  const [selectedJobRoleId, setSelectedJobRoleId] = useState<string>('semiconductor_process');
   const [careerLevel, setCareerLevel] = useState<'신입' | '주니어 (1~3년)' | '시니어 (4년 이상)'>('주니어 (1~3년)');
   const [pressureLevel, setPressureLevel] = useState<PressureLevel>('high');
-  const [selectedPersonaId, setSelectedPersonaId] = useState<string>('ruthless_po');
+  const [selectedPersonaId, setSelectedPersonaId] = useState<string>('semi_master');
   const [resumeText, setResumeText] = useState<string>(
-    '핀테크 결제 정산 트래픽 급증 상황에서 Redis 캐싱 레이어 도입 및 배치 쿼리 튜닝으로 응답 지연 시간을 420ms에서 65ms로 단축했습니다.'
+    'GAA 3나노 공정 라인에서 게이트 산화막 에칭 시 플라즈마 전력과 압력 파라미터를 최적화하여 채널 결함 밀도를 28% 저감하고 수율 마진을 확보했습니다.'
   );
   const [enableCamera, setEnableCamera] = useState<boolean>(true);
   const [enableVoice, setEnableVoice] = useState<boolean>(true);
@@ -156,6 +156,63 @@ export const SetupView: React.FC<SetupViewProps> = ({ onStartInterview, isLoadin
               </button>
             );
           })}
+        </div>
+
+        {/* Engineering College Quick Scenarios */}
+        <div className="pt-3 flex flex-wrap items-center justify-center gap-2 text-xs">
+          <span className="text-slate-500 font-medium">공과대학 추천 프리셋:</span>
+          <button
+            onClick={() => {
+              setSelectedMode('general');
+              setSelectedCompanyId('samsung_ds');
+              setSelectedJobRoleId('semiconductor_process');
+              setSelectedPersonaId('semi_master');
+              setPressureLevel('extreme');
+              setResumeText('3나노 GAA 나노시트 식각 공정 수율 저하 분석 및 파라미터 튜닝');
+            }}
+            className="px-2.5 py-1 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+          >
+            🔬 삼성전자 DS 반도체 수율 송곳압박
+          </button>
+          <button
+            onClick={() => {
+              setSelectedMode('general');
+              setSelectedCompanyId('hyundai_rnd');
+              setSelectedJobRoleId('mechanical_cae');
+              setSelectedPersonaId('mobility_lead');
+              setPressureLevel('high');
+              setResumeText('전기차 배터리 팩 냉각을 위한 3D 열유동해석(CFD) 및 이종 접합 강도 검증');
+            }}
+            className="px-2.5 py-1 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+          >
+            🚗 현대차 R&D 기계/CAE 가혹조건 검증
+          </button>
+          <button
+            onClick={() => {
+              setSelectedMode('general');
+              setSelectedCompanyId('lg_ensol');
+              setSelectedJobRoleId('battery_chemical');
+              setSelectedPersonaId('battery_specialist');
+              setPressureLevel('high');
+              setResumeText('하이니켈 양극재 열폭주 억제를 위한 산화물 코팅 및 덴드라이트 방지');
+            }}
+            className="px-2.5 py-1 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+          >
+            🔋 LG엔솔 배터리 소재/안전마진
+          </button>
+          <button
+            onClick={() => {
+              setSelectedMode('general');
+              setSelectedCompanyId('tech_engineering');
+              setSelectedJobRoleId('computer_systems');
+              setSelectedPersonaId('kernel_master');
+              setPressureLevel('extreme');
+              setResumeText('리눅스 커널 I/O 스케줄링 튜닝 및 락프리 메모리 동시성 파이프라인');
+            }}
+            className="px-2.5 py-1 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+          >
+            💻 네이버 클라우드 커널/분산시스템
+          </button>
         </div>
       </section>
 

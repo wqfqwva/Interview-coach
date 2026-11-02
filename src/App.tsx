@@ -56,9 +56,9 @@ export default function App() {
     setCurrentRoundNumber(1);
     setFinalReport(null);
 
-    // Initial contextual question tailored to the mode
-    let initialQuestion = `${interviewSetup.company}의 ${interviewSetup.jobRole} 직무에 지원하셨는데, 최근 가장 높은 기술적 난이도를 극복하고 유의미한 비즈니스 임팩트를 냈던 프로젝트 경험을 말씀해 주십시오.`;
-    let initialIntent = '실전 문제 해결 능력 및 직무 핵심 성과 검증';
+    // Initial contextual question tailored to engineering and STEM tracks
+    let initialQuestion = `${interviewSetup.company}의 ${interviewSetup.jobRole} 직무에 지원하셨는데, 최근 전공 프로젝트나 연구에서 직면했던 가장 치명적인 공학적 한계점(Bottleneck)과 이를 극복한 구체적 메커니즘을 말씀해 주십시오.`;
+    let initialIntent = '실전 공학적 문제 해결 메커니즘 및 직무 전공 역량 검증';
 
     if (interviewSetup.mode === 'debate' && interviewSetup.debateSetup) {
       initialQuestion = `"${interviewSetup.debateSetup.topic}"에 대해 저는 ${interviewSetup.debateSetup.assignedStance === '찬성' ? '반대' : '찬성'}하는 입장입니다. 조직의 안정성과 리스크 관리를 고려할 때 상대측의 주장은 실현 불가능합니다. ${interviewSetup.debateSetup.assignedStance}측의 핵심 논거와 지속 가능한 대안을 먼저 제시해 주십시오.`;
