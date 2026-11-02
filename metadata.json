@@ -1,0 +1,9 @@
+{
+  "name": "AI 압박 면접 시뮬레이터",
+  "description": "진짜 면접처럼 직무 압박 질문, 찬반 공방 토론 면접, 3분 비즈니스 PT 면접, 글로벌 영어 면접(CEFR) 및 시선·말버릇 분석을 제공하는 실전 면접 시뮬레이션 플랫폼",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
